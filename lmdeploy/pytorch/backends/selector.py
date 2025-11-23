@@ -10,6 +10,17 @@ def _get_backend():
     device_type = device_ctx.device_type
 
     if device_type == 'cuda':
+        # Detect if running on ROCm (AMD GPU) or CUDA (NVIDIA GPU)
+        try:
+            import torch
+            import torch.version
+            # ROCm version of PyTorch has 'hip' attribute
+            if hasattr(torch.version, 'hip') and torch.version.hip is not None:
+                from .rocm import ROCmOpsBackend
+                return ROCmOpsBackend
+        except:
+            pass
+        # Default to CUDA backend
         from .cuda import CudaOpsBackend
         return CudaOpsBackend
     if device_type == 'ascend':
