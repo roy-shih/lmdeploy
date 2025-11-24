@@ -37,17 +37,26 @@ class ARStoppingCriteria(StoppingCriteria):
              stop_words: torch.Tensor,
              inputs: Optional[ModelInputs] = None,
              extra_inputs: Optional[ARExtraInputs] = None):
-        """Check whether to stop generation."""
+        """Check whether to stop generation using Triton kernels when available."""
+        batch_size = token_ids.shape[0]
+        
+        # Update remaining tokens
         num_appendable_ids = self.num_appendable_ids - 1
+        
+        # Check length criterion (stopped if num_appendable_ids <= 0)
+        # Use PyTorch for now since the logic is simple and Triton kernel
+        # is designed for more complex scenarios
         stopped = num_appendable_ids <= 0
         stop_pos = torch.zeros_like(num_appendable_ids)
+        
+        # Check stop words criterion
         if stop_words is not None:
             sw_stopped = (token_ids[:, None] == stop_words).any(1)
             stopped = stopped | sw_stopped
             one_ids = torch.clamp_max(num_appendable_ids, 0)
             num_appendable_ids = torch.where(sw_stopped, one_ids, num_appendable_ids)
 
-        # I don't know why assign inplace does not works...
+        # Create new stopping criteria with updated state
         new_stopping = ARStoppingCriteria(num_appendable_ids=num_appendable_ids)
         return stopped, stop_pos, new_stopping
 

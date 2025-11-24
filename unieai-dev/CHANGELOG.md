@@ -90,7 +90,37 @@ This document tracks all modifications made to port TurboMind's high-performance
 
 ---
 
-### 4. Logits Processor Integration (`lmdeploy/pytorch/engine/logits_process.py`)
+### 4. Stop Criteria Kernel (`lmdeploy/pytorch/kernels/cuda/stop_criteria.py`)
+
+**Status**: ✅ **New Implementation**
+
+**Changes**:
+- **Added**: Two Triton kernels for generation stopping conditions
+  - **`length_criterion_kernel`**: Checks if sequences reached max length
+  - **`stop_words_criterion_kernel`**: Checks if last token matches stop words (single-token)
+- **Optimized**: Stride-based indexing for non-contiguous tensor support
+- **Optimized**: `do_not_specialize` on `current_step` to avoid per-step JIT recompilation
+
+**Design Rationale**:
+- Uses runtime scalars for `batch_size` and `current_step` (not `tl.constexpr`)
+- Passes strides explicitly to support arbitrary tensor layouts
+- Forces `.contiguous()` in wrappers for safety
+- Comprehensive input validation with clear error messages
+
+**Performance Impact**:
+- ✅ Vectorized batch processing (BLOCK_SIZE=128)
+- ✅ Avoids JIT overhead with `do_not_specialize`
+- ✅ Memory-safe with stride-based addressing
+
+**Integration Status**:
+- Available as standalone utility functions
+- Not integrated into `ARStoppingCriteria` (current PyTorch logic is already efficient)
+
+**Reference**: `src/turbomind/kernels/stop_criteria_kernels.cu`
+
+---
+
+### 5. Logits Processor Integration (`lmdeploy/pytorch/engine/logits_process.py`)
 
 **Status**: ✅ **Modified**
 
@@ -133,6 +163,10 @@ def _process_repetition_penalty_(scores, input_ids, penalty):
   - Multiplicative penalty test
   - Additive penalty test
   - Duplicate token handling test
+- `test_stop_criteria_standalone.py` - Correctness tests for stop criteria
+  - Length criterion test
+  - Stop words criterion test
+  - Combined criteria (OR logic) test
 
 **Status**: ⚠️ Requires CUDA environment (cannot run on macOS)
 
@@ -142,11 +176,11 @@ def _process_repetition_penalty_(scores, input_ids, penalty):
 
 | Category | Files Modified | Files Added | Lines Changed |
 |----------|----------------|-------------|---------------|
-| Kernels | 3 | 1 | ~500 |
+| Kernels | 3 | 2 | ~750 |
 | Integration | 1 | 0 | ~10 |
-| Documentation | 1 | 0 | ~5 |
-| Tests | 0 | 1 | ~150 |
-| **Total** | **5** | **2** | **~665** |
+| Documentation | 1 | 1 | ~50 |
+| Tests | 0 | 2 | ~250 |
+| **Total** | **5** | **5** | **~1060** |
 
 ---
 
@@ -157,6 +191,7 @@ def _process_repetition_penalty_(scores, input_ids, penalty):
 | RMSNorm | ✅ | ✅ | ⚠️ (needs CUDA) | ⚠️ (needs CUDA) |
 | RoPE | ✅ | ✅ | ⚠️ (needs CUDA) | ⚠️ (needs CUDA) |
 | Sampling Penalty | ✅ | ✅ | ⚠️ (needs CUDA) | ⚠️ (needs CUDA) |
+| Stop Criteria | ✅ | ✅ | ⚠️ (needs CUDA) | ⚠️ (needs CUDA) |
 
 ---
 

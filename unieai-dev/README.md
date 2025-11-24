@@ -25,7 +25,7 @@ This document tracks the status of porting TurboMind's CUDA kernels to Triton fo
 | **Quantization** | `quantization.cu` | Weight-only quantization utils | `w8a8_kernels.py` | | ✅ **Done** |
 | **Misc** | `apply_token_bitmask_inplace_cuda.cu` | Masking operations | N/A | | ❌ **Missing** |
 | | `ban_bad_words.cu` | Generation constraints | N/A | | ❌ **Missing** |
-| | `stop_criteria_kernels.cu` | Stop criteria check | N/A | | ❌ **Missing** |
+| | `stop_criteria_kernels.cu` | Stop criteria check | `stop_criteria.py` | ✅ | ✅ **Done** (Length + Stop words) |
 
 ## High-Priority Porting Candidates
 
