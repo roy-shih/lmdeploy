@@ -51,60 +51,65 @@ def apply_rotary_pos_emb_qk_kernel(
     BLOCK_N: tl.constexpr,
 ):
     """Apply rotary on key AND query kernel."""
-    seq_block_id = tl.program_id(1)
     head_id = tl.program_id(0)
+    seq_block_id = tl.program_id(1)
 
-    pos_offset = seq_block_id * BLOCK + tl.arange(0, BLOCK)
-    pos_mask = pos_offset < seq_len
-    pos_offset = tl.max_contiguous(tl.multiple_of(pos_offset % seq_len, BLOCK), BLOCK)
+    offs_s = seq_block_id * BLOCK + tl.arange(0, BLOCK)
+    mask_s = offs_s < seq_len
 
     feat_size = half_size * 2
-    feat_offset_l = tl.arange(0, BLOCK_N)
-    feat_mask = feat_offset_l < half_size
-    feat_offset_l = feat_offset_l % half_size
-    feat_offset_h = half_size + feat_offset_l
-    seq_mask = pos_mask[:, None] & feat_mask[None, :]
-    cs_offset_l = pos_offset[:, None] * feat_size + feat_offset_l[None, :]
-    cs_offset_h = pos_offset[:, None] * feat_size + feat_offset_h[None, :]
+    offs_d = tl.arange(0, BLOCK_N)
+    mask_d = offs_d < half_size
+
+    feat_offset_l = offs_d
+    feat_offset_h = feat_offset_l + half_size
+
+    # [BLOCK, BLOCK_N] mask
+    seq_mask = mask_s[:, None] & mask_d[None, :]
+
+    # cos/sin index: [seq, dim]
+    cs_offset_l = offs_s[:, None] * feat_size + feat_offset_l[None, :]
+    cs_offset_h = offs_s[:, None] * feat_size + feat_offset_h[None, :]
+
     q_elem_type = Q.dtype.element_ty
-    cos_l = tl.load(COS + cs_offset_l).to(q_elem_type)
-    cos_h = tl.load(COS + cs_offset_h).to(q_elem_type)
-    sin_l = tl.load(SIN + cs_offset_l).to(q_elem_type)
-    sin_h = tl.load(SIN + cs_offset_h).to(q_elem_type)
+    cos_l = tl.astype(tl.load(COS + cs_offset_l, mask=seq_mask, other=0.0), q_elem_type)
+    cos_h = tl.astype(tl.load(COS + cs_offset_h, mask=seq_mask, other=0.0), q_elem_type)
+    sin_l = tl.astype(tl.load(SIN + cs_offset_l, mask=seq_mask, other=0.0), q_elem_type)
+    sin_h = tl.astype(tl.load(SIN + cs_offset_h, mask=seq_mask, other=0.0), q_elem_type)
 
     if head_id < BLOCK_QH:
-        q_ptr = Q + pos_offset * stride_qs
-        qe_ptr = Q_EMB + pos_offset * stride_qes
-        ql_ptrs = q_ptr[:, None] + feat_offset_l[None, :] * stride_qd
-        qh_ptrs = q_ptr[:, None] + feat_offset_h[None, :] * stride_qd
-        qel_ptrs = qe_ptr[:, None] + feat_offset_l[None, :] * stride_qed
-        qeh_ptrs = qe_ptr[:, None] + feat_offset_h[None, :] * stride_qed
-        ql_ptrs += head_id * stride_qh
-        qh_ptrs += head_id * stride_qh
-        qel_ptrs += head_id * stride_qeh
-        qeh_ptrs += head_id * stride_qeh
+        # Q path
+        q_ptr = Q + offs_s[:, None] * stride_qs
+        qe_ptr = Q_EMB + offs_s[:, None] * stride_qes
 
-        q_l = tl.load(ql_ptrs)
-        q_h = tl.load(qh_ptrs)
+        ql_ptrs = q_ptr + feat_offset_l[None, :] * stride_qd + head_id * stride_qh
+        qh_ptrs = q_ptr + feat_offset_h[None, :] * stride_qd + head_id * stride_qh
+
+        qel_ptrs = qe_ptr + feat_offset_l[None, :] * stride_qed + head_id * stride_qeh
+        qeh_ptrs = qe_ptr + feat_offset_h[None, :] * stride_qed + head_id * stride_qeh
+
+        q_l = tl.load(ql_ptrs, mask=seq_mask, other=0.0)
+        q_h = tl.load(qh_ptrs, mask=seq_mask, other=0.0)
 
         qe_l, qe_h = _apply_rotary_impl(q_l, q_h, cos_l, cos_h, sin_l, sin_h)
 
         tl.store(qel_ptrs, qe_l, mask=seq_mask)
         tl.store(qeh_ptrs, qe_h, mask=seq_mask)
     else:
-        head_id = head_id - BLOCK_QH
-        k_ptr = K + pos_offset * stride_ks
-        ke_ptr = K_EMB + pos_offset * stride_kes
-        kl_ptrs = k_ptr[:, None] + feat_offset_l[None, :] * stride_kd
-        kh_ptrs = k_ptr[:, None] + feat_offset_h[None, :] * stride_kd
-        kel_ptrs = ke_ptr[:, None] + feat_offset_l[None, :] * stride_ked
-        keh_ptrs = ke_ptr[:, None] + feat_offset_h[None, :] * stride_ked
-        kl_ptrs += head_id * stride_kh
-        kh_ptrs += head_id * stride_kh
-        kel_ptrs += head_id * stride_keh
-        keh_ptrs += head_id * stride_keh
-        k_l = tl.load(kl_ptrs)
-        k_h = tl.load(kh_ptrs)
+        # K path
+        k_head_id = head_id - BLOCK_QH
+
+        k_ptr = K + offs_s[:, None] * stride_ks
+        ke_ptr = K_EMB + offs_s[:, None] * stride_kes
+
+        kl_ptrs = k_ptr + feat_offset_l[None, :] * stride_kd + k_head_id * stride_kh
+        kh_ptrs = k_ptr + feat_offset_h[None, :] * stride_kd + k_head_id * stride_kh
+
+        kel_ptrs = ke_ptr + feat_offset_l[None, :] * stride_ked + k_head_id * stride_keh
+        keh_ptrs = ke_ptr + feat_offset_h[None, :] * stride_ked + k_head_id * stride_keh
+
+        k_l = tl.load(kl_ptrs, mask=seq_mask, other=0.0)
+        k_h = tl.load(kh_ptrs, mask=seq_mask, other=0.0)
 
         ke_l, ke_h = _apply_rotary_impl(k_l, k_h, cos_l, cos_h, sin_l, sin_h)
 
@@ -121,16 +126,22 @@ def apply_rotary_pos_emb(q: Tensor,
     """Apply rotary positional embedding on query and key.
 
     Args:
-        q (Tensor): Query state.
-        k (Tensor): Key state.
-        cos (Tensor): cosine matrix (seq_len, dim).
-        sin (Tensor): sine matrix (seq_len, dim).
+        q (Tensor): Query state. Expected shape: [..., seq_len, num_heads, head_dim]
+        k (Tensor): Key state. Expected shape: [..., seq_len, num_heads, head_dim]
+        cos (Tensor): cosine matrix (seq_len, dim). Must be contiguous.
+        sin (Tensor): sine matrix (seq_len, dim). Must be contiguous.
         q_embed (Tensor): output q, can be same as q
         k_embed (Tensor): output k, can be same as k
 
     Returns:
         Tuple[Tensor, Tensor]: Embedded query and key.
     """
+    # Ensure cos/sin are contiguous for safe flatten indexing
+    if not cos.is_contiguous():
+        cos = cos.contiguous()
+    if not sin.is_contiguous():
+        sin = sin.contiguous()
+    
     if cos.device != q.device:
         cos = cos.to(device=q.device)
     if sin.device != q.device:
@@ -152,7 +163,8 @@ def apply_rotary_pos_emb(q: Tensor,
         raise ValueError('Not support head_dim < rope_dim, '
                          f'but given head_dim={q.size(-1)} '
                          f'rope_dim={cos.size(-1)}')
-    BLOCK_N = triton.next_power_of_2(half_size)
+    # Use half_size directly instead of next_power_of_2 to avoid wasting registers
+    BLOCK_N = half_size
     num_heads_q = q.size(-2)
     num_heads_k = k.size(-2)
     num_warps = 2

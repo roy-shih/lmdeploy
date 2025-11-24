@@ -30,12 +30,17 @@ def _process_bad_words_(scores: torch.Tensor,
 
 
 def _process_repetition_penalty_(scores: torch.Tensor, input_ids: torch.LongTensor, penalty: torch.Tensor):
-    """Process repetition penalty."""
-    score = torch.gather(scores, 1, input_ids)
-    penalty = penalty.to(score.dtype)
-    score = torch.where(score < 0, score * penalty[:, None], score / penalty[:, None])
-    scores.scatter_(1, input_ids, score)
-    return scores
+    """Process repetition penalty using Triton kernel."""
+    try:
+        from lmdeploy.pytorch.kernels.cuda.sampling_penalty import apply_repetition_penalty
+        return apply_repetition_penalty(scores, input_ids, penalty, penalty_type='multiplicative')
+    except ImportError:
+        # Fallback to PyTorch implementation if Triton is not available
+        score = torch.gather(scores, 1, input_ids)
+        penalty = penalty.to(score.dtype)
+        score = torch.where(score < 0, score * penalty[:, None], score / penalty[:, None])
+        scores.scatter_(1, input_ids, score)
+        return scores
 
 
 def _filter_topk_sorted_(scores: torch.Tensor, topk: torch.LongTensor, filter_value: float = -float('inf')):
