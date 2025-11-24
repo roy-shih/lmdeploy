@@ -12,16 +12,16 @@
 | 6 | **SM90 GEMM (H100)** | `gemm/kernel/sm90_*.cu` (4个) | `cuda/arch_gemm.py` | 🔴 | ⭐⭐⭐⭐ | 4-6周 | ✅ |
 | 7 | **TMA (H100)** | `gemm/tma.cu` | `cuda/arch_gemm.py` | 🔴 | ⭐⭐⭐⭐⭐ | 6-8周 | ✅ |
 | 8 | **GELU and Mul** | `activation_kernels.cu` | `cuda/activation.py` (扩展) | 🟡 | ⭐ | 3-5天 | ✅ |
-| 9 | **Penalty Kernels** | `sampling_penalty_kernels.cu` | `cuda/sampling_penalty.py` | 🟡 | ⭐⭐ | 1周 | ⬜ |
+| 9 | **Penalty Kernels** | `sampling_penalty_kernels.cu` | `cuda/sampling_penalty.py` | 🟡 | ⭐⭐ | 1周 | ✅ |
 | 10 | **Embedding + Pos Enc** | `decoding_kernels.cu` | `cuda/embedding_lookup.py` | 🟡 | ⭐⭐ | 1周 | ✅ |
 | 11 | **Context Parallelism** | `attention/cp_utils.cu` | `cuda/arch_gemm.py` | 🟡 | ⭐⭐⭐⭐ | 3-4周 | ✅ |
 | 12 | **Online Quant** | `quantization.cu` | `cuda/online_quant.py` | 🟡 | ⭐⭐⭐ | 2-3周 | ✅ |
 | 12b | **GPTQ/SmoothQuant** | `gemm/*.cu` | `cuda/quant_linear.py` | 🟡 | ⭐⭐⭐ | 2-3周 | ✅ |
-| 13 | **Type Convert** | `gemm/convert_v3.cu` | `cuda/type_convert.py` | 🟡 | ⭐⭐ | 1周 | ⬜ |
-| 14 | **Log Probability** | `logprob_kernels.cu` | `cuda/logprob.py` | 🟡 | ⭐⭐ | 1周 | ⬜ |
-| 15 | **Attention Reduce** | `attention/reduce.cu` | `cuda/attention_reduce.py` | 🟡 | ⭐⭐ | 1周 | ⬜ |
-| 16 | **Bad Words Ban** | `ban_bad_words.cu` | `cuda/ban_bad_words.py` | 🟢 | ⭐⭐ | 1周 | ⬜ |
-| 17 | **Stop Criteria** | `stop_criteria_kernels.cu` | `cuda/stop_criteria.py` | 🟢 | ⭐ | 3-5天 | ⬜ |
+| 13 | **Type Convert** | `gemm/convert_v3.cu` | `cuda/type_convert.py` | 🟡 | ⭐⭐ | 1周 | ✅ |
+| 14 | **Log Probability** | `logprob_kernels.cu` | `cuda/logprob.py` | 🟡 | ⭐⭐ | 1周 | ✅ |
+| 15 | **Attention Reduce** | `attention/reduce.cu` | `cuda/attention_reduce.py` | 🟡 | ⭐⭐ | 1周 | ✅ |
+| 16 | **Bad Words Ban** | `ban_bad_words.cu` | `cuda/ban_bad_words.py` | 🟢 | ⭐⭐ | 1周 | ✅ |
+| 17 | **Stop Criteria** | `stop_criteria_kernels.cu` | `cuda/stop_criteria.py` | 🟢 | ⭐ | 3-5天 | ✅ |
 
 **图例**:
 - 优先级: 🔴 高 | 🟡 中 | 🟢 低
@@ -32,29 +32,33 @@
 
 ## 📅 建议时间线
 
-### **Week 1-2: 快速胜利**
-- [ ] #8 GELU and Mul (3-5天) ← **从这个开始！**
-- [ ] #17 Stop Criteria (3-5天)
+### **Week 1-2: 快速胜利** ✅ COMPLETED
+- [x] #8 GELU and Mul (3-5天)
+- [x] #17 Stop Criteria (3-5天)
 
-### **Week 3-6: 核心功能**
-- [ ] #1 Top-K Sampling (1-2周)
-- [ ] #9 Penalty Kernels (1周)
-- [ ] #10 Embedding + Pos Enc (1周)
+### **Week 3-6: 核心功能** ✅ COMPLETED
+- [x] #1 Top-K Sampling (1-2周)
+- [x] #9 Penalty Kernels (1周)
+- [x] #10 Embedding + Pos Enc (1周)
 
-### **Week 7-10: 量化支持**
-- [ ] #3 KV Cache INT8 (1-2周)
-- [ ] #13 Type Convert (1周)
-- [ ] #14 Log Probability (1周)
+### **Week 7-10: 量化支持** ✅ COMPLETED
+- [x] #3 KV Cache INT8 (1-2周)
+- [x] #13 Type Convert (1周)
+- [x] #14 Log Probability (1周)
 
-### **Week 11-16: 高性能优化**
-- [ ] #2 Top-P Sampling (2-3周)
-- [ ] #4 KV Cache INT4 (2-3周)
-- [ ] #5 SM80 GEMM (2-3周)
+### **Week 11-16: 高性能优化** ✅ COMPLETED
+- [x] #2 Top-P Sampling (2-3周)
+- [x] #4 KV Cache INT4 (2-3周)
+- [x] #5 SM80 GEMM (2-3周)
 
-### **Month 4-6: 高级功能**
-- [ ] #11 Context Parallelism (3-4周)
-- [ ] #6 SM90 GEMM (4-6周)
-- [ ] #7 TMA (6-8周)
+### **Month 4-6: 高级功能** ✅ COMPLETED
+- [x] #11 Context Parallelism (3-4周)
+- [x] #6 SM90 GEMM (4-6周)
+- [x] #7 TMA (6-8周)
+- [x] #12 Online Quant (2-3周)
+- [x] #12b GPTQ/SmoothQuant (2-3周)
+- [x] #15 Attention Reduce (1周)
+- [x] #16 Bad Words Ban (1周)
 
 ---
 
@@ -128,6 +132,7 @@
 | Kernel | PyTorch 文件 | 说明 |
 |--------|--------------|------|
 | ✅ SiLU and Mul | `cuda/activation.py` | Fused SiLU + multiply |
+| ✅ GELU and Mul | `cuda/activation.py` | Fused GELU + multiply |
 | ✅ Flash Attention | `cuda/flashattention.py` | Prefill attention |
 | ✅ Paged Attention | `cuda/pagedattention.py` | Decoding attention |
 | ✅ Alibi Paged Attn | `cuda/alibi_pagedattention.py` | ALiBi 位置编码 |
@@ -145,8 +150,21 @@
 | ✅ Flatten KV Cache | `cuda/flatten_kv_cache.py` | KV cache 重组 |
 | ✅ Fused LoRA | `cuda/fused_lora.py` | LoRA adapter |
 | ✅ Multinomial | `cuda/multinomial_sampling.py` | 多项式采样 |
+| ✅ Top-K Sampling | `cuda/topk_sampling.py` | Top-K 采样 |
+| ✅ Top-P Sampling | `cuda/topp_sampling.py` | Nucleus 采样 |
+| ✅ Embedding Lookup | `cuda/embedding_lookup.py` | 嵌入查找 + 位置编码 |
+| ✅ KV Cache Quant | `cuda/kv_cache_quant.py` | INT4/INT8 KV cache 量化 |
+| ✅ Online Quant | `cuda/online_quant.py` | W8A8 在线量化 |
+| ✅ GPTQ/SmoothQuant | `cuda/quant_linear.py` | GPTQ & SmoothQuant |
+| ✅ Arch GEMM | `cuda/arch_gemm.py` | SM80/SM90 优化 GEMM + TMA + CP |
+| ✅ Sampling Penalty | `cuda/sampling_penalty.py` | 温度/重复/频率/presence 惩罚 |
+| ✅ Type Convert | `cuda/type_convert.py` | FP16/BF16/FP32/INT8 转换 |
+| ✅ Log Probability | `cuda/logprob.py` | 对数概率计算 |
+| ✅ Attention Reduce | `cuda/attention_reduce.py` | Attention 归约工具 |
+| ✅ Bad Words Ban | `cuda/ban_bad_words.py` | 禁止词屏蔽 |
+| ✅ Stop Criteria | `cuda/stop_criteria.py` | 停止条件判断 |
 
-这些已完成的 kernels 可以作为你移植新 kernels 的参考！
+**全部 18 个高优先级 Kernels 已完成！** 🎉
 
 ---
 
