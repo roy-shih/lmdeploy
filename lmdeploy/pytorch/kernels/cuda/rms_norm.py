@@ -5,200 +5,242 @@ import triton.language as tl
 from torch import Tensor
 
 
-# -------------------------------
-# Utility: RMSNorm compute (FP32 accumulate)
-# -------------------------------
 @triton.jit
 def _rms_forward(x_fp32, w, eps: tl.constexpr, N_COLS: tl.constexpr):
     sq = x_fp32 * x_fp32
     var = tl.sum(sq, axis=0) / N_COLS
     inv = tl.math.rsqrt(var + eps)
     y = x_fp32 * inv
-    y = y * w.to(tl.float32)
+    y = y * w
     return y
 
 
-# -------------------------------
-# Pure RMSNorm
-# -------------------------------
 @triton.jit
 def rms_norm_kernel(
     X, W, OUT,
-    seq_len,
-    stride,
+    stride_x,       # stride over dim
     eps: tl.constexpr,
     N_COLS: tl.constexpr,
     BLOCK: tl.constexpr,
 ):
-    pid = tl.program_id(0)
+    """
+    Pure RMSNorm: OUT = RMSNorm(X) * W
+    X/OUT layout: flatten to [N_ROWS, N_COLS]
+    每個 program 處理一整 row
+    """
+    row_id = tl.program_id(0)
 
     offs = tl.arange(0, BLOCK)
     mask = offs < N_COLS
 
-    # each pid handles a row
-    row_ptr = X + pid * stride + offs
-    w = tl.load(W + offs, mask=mask)
+    x_ptr = X + row_id * stride_x + offs
+    out_ptr = OUT + row_id * stride_x + offs
 
-    x = tl.load(row_ptr, mask=mask).to(tl.float32)
+    x = tl.load(x_ptr, mask=mask, other=0.0)
+    x_fp32 = tl.astype(x, tl.float32)
 
-    y = _rms_forward(x, w, eps, N_COLS)
+    w = tl.load(W + offs, mask=mask, other=0.0)
+    w = tl.astype(w, tl.float32)
 
-    out_ptr = OUT + pid * stride + offs
-    tl.store(out_ptr, y.to(X.dtype.element_ty), mask=mask)
+    y_fp32 = _rms_forward(x_fp32, w, eps, N_COLS)
+    y = tl.astype(y_fp32, X.dtype.element_ty)
+
+    tl.store(out_ptr, y, mask=mask)
 
 
-# -------------------------------
-# Residual + RMSNorm
-# -------------------------------
 @triton.jit
 def add_rms_norm_kernel(
     X, W, RES, OUT, OUT_RES,
-    seq_len,
-    x_stride,
-    res_stride,
+    stride_x,
+    stride_res,
     eps: tl.constexpr,
     N_COLS: tl.constexpr,
     BLOCK: tl.constexpr,
 ):
-    pid = tl.program_id(0)
+    """
+    Residual + RMSNorm:
+      new_res = X + RES
+      OUT     = RMSNorm(new_res) * W
+      OUT_RES = new_res
+    """
+    row_id = tl.program_id(0)
 
     offs = tl.arange(0, BLOCK)
     mask = offs < N_COLS
 
-    w = tl.load(W + offs, mask=mask)
+    x_ptr = X + row_id * stride_x + offs
+    r_ptr = RES + row_id * stride_res + offs
+    out_ptr = OUT + row_id * stride_x + offs
+    out_res_ptr = OUT_RES + row_id * stride_res + offs
 
-    x_ptr = X + pid * x_stride + offs
-    r_ptr = RES + pid * res_stride + offs
-    out_ptr = OUT + pid * x_stride + offs
-    out_res_ptr = OUT_RES + pid * res_stride + offs
+    x = tl.load(x_ptr, mask=mask, other=0.0)
+    r = tl.load(r_ptr, mask=mask, other=0.0)
 
-    x = tl.load(x_ptr, mask=mask).to(tl.float32)
-    r = tl.load(r_ptr, mask=mask).to(tl.float32)
+    x_fp32 = tl.astype(x, tl.float32)
+    r_fp32 = tl.astype(r, tl.float32)
 
-    new = x + r
-    tl.store(out_res_ptr, new.to(X.dtype.element_ty), mask=mask)
+    new_res_fp32 = x_fp32 + r_fp32
+    new_res = tl.astype(new_res_fp32, X.dtype.element_ty)
+    tl.store(out_res_ptr, new_res, mask=mask)
 
-    y = _rms_forward(new, w, eps, N_COLS)
-    tl.store(out_ptr, y.to(X.dtype.element_ty), mask=mask)
+    w = tl.load(W + offs, mask=mask, other=0.0)
+    w = tl.astype(w, tl.float32)
+
+    y_fp32 = _rms_forward(new_res_fp32, w, eps, N_COLS)
+    y = tl.astype(y_fp32, X.dtype.element_ty)
+
+    tl.store(out_ptr, y, mask=mask)
 
 
-# -------------------------------
-# Bias + Residual + RMSNorm  (TurboMind exact)
-# new_res = x + bias + res
-# y = RMSNorm(new_res)
-# -------------------------------
 @triton.jit
 def bias_residual_rms_norm_kernel(
     X, W, BIAS, RES, OUT,
-    seq_len,
-    x_stride,
-    res_stride,
+    stride_x,
+    stride_res,
     eps: tl.constexpr,
     N_COLS: tl.constexpr,
     BLOCK: tl.constexpr,
 ):
     """
-    Bias + Residual + RMSNorm Kernel.
-    
-    Reference Implementation: src/turbomind/kernels/norm/rms_norm.cu (BiasResidualRMSNormKernel)
-    
-    Why this fusion is important:
-    1. Memory Bandwidth Optimization: 
-       TurboMind fuses Bias Add, Residual Add, and RMSNorm into a single kernel.
-       Without fusion: 
-         - Read Input, Read Bias -> Add -> Write Temp (Memory R/W)
-         - Read Temp, Read Residual -> Add -> Write Residual (Memory R/W)
-         - Read Residual -> RMSNorm -> Write Output (Memory R/W)
-       With fusion:
-         - Read Input, Bias, Residual -> Compute All -> Write Residual, Write Output
-       This significantly reduces global memory traffic, which is the bottleneck for normalization layers.
-       
-    2. Logic Alignment:
-       We strictly follow TurboMind's logic:
-       - New_Residual = Input + Bias + Old_Residual
-       - Output = RMSNorm(New_Residual)
-       - Store New_Residual (for next layer's skip connection)
-       - Store Output (for next layer's input)
+    Bias + Residual + RMSNorm:
+      new_res = X + BIAS + RES
+      RES     = new_res  (in-place 更新 residual)
+      OUT     = RMSNorm(new_res) * W
     """
-    pid = tl.program_id(0)
+    row_id = tl.program_id(0)
 
     offs = tl.arange(0, BLOCK)
     mask = offs < N_COLS
 
-    w = tl.load(W + offs, mask=mask)
-    b = tl.load(BIAS + offs, mask=mask).to(tl.float32)
+    x_ptr = X + row_id * stride_x + offs
+    r_ptr = RES + row_id * stride_res + offs
+    out_ptr = OUT + row_id * stride_x + offs
 
-    x_ptr = X + pid * x_stride + offs
-    r_ptr = RES + pid * res_stride + offs
-    out_ptr = OUT + pid * x_stride + offs
+    x = tl.load(x_ptr, mask=mask, other=0.0)
+    r = tl.load(r_ptr, mask=mask, other=0.0)
+    b = tl.load(BIAS + offs, mask=mask, other=0.0)
 
-    x = tl.load(x_ptr, mask=mask).to(tl.float32)
-    r = tl.load(r_ptr, mask=mask).to(tl.float32)
+    x_fp32 = tl.astype(x, tl.float32)
+    r_fp32 = tl.astype(r, tl.float32)
+    b_fp32 = tl.astype(b, tl.float32)
 
-    new = x + b + r
+    new_res_fp32 = x_fp32 + b_fp32 + r_fp32
+    new_res = tl.astype(new_res_fp32, X.dtype.element_ty)
 
-    # update residual in-place
-    tl.store(r_ptr, new.to(X.dtype.element_ty), mask=mask)
+    # in-place 更新 residual
+    tl.store(r_ptr, new_res, mask=mask)
 
-    # RMSNorm
-    y = _rms_forward(new, w, eps, N_COLS)
-    tl.store(out_ptr, y.to(X.dtype.element_ty), mask=mask)
+    w = tl.load(W + offs, mask=mask, other=0.0)
+    w = tl.astype(w, tl.float32)
+
+    y_fp32 = _rms_forward(new_res_fp32, w, eps, N_COLS)
+    y = tl.astype(y_fp32, X.dtype.element_ty)
+
+    tl.store(out_ptr, y, mask=mask)
 
 
-# -------------------------------
-# Host Function
-# -------------------------------
-def rms_norm(x: Tensor, weight: Tensor,
-             eps=1e-6, residual=None, bias=None,
-             out=None, out_residual=None):
-    """RMS Normalization with optional bias and residual fusion."""
-    B, S, D = x.shape
-    device = x.device
+def rms_norm(
+    x: Tensor,
+    weight: Tensor,
+    eps: float = 1e-6,
+    residual: Tensor = None,
+    bias: Tensor = None,
+    out: Tensor = None,
+    out_residual: Tensor = None,
+):
+    """
+    ROCm 友善版 RMSNorm + (Bias)Residual fusion
+    支援 layout: [..., seq_len, hidden_size]，最後一維是 hidden_size
+    
+    Args:
+        x: input tensor
+        weight: RMSNorm weight
+        eps: epsilon for numerical stability
+        residual: optional residual tensor
+        bias: optional bias tensor
+        out: optional output tensor
+        out_residual: optional output residual tensor
+    
+    Returns:
+        out or (out, out_residual)
+    """
+    if not x.is_contiguous():
+        x = x.contiguous()
 
-    BLOCK = min(triton.next_power_of_2(D), 2048)
+    B = x.numel() // x.size(-1)
+    D = x.size(-1)
+
+    assert weight.shape[0] == D
+    W = weight
+
+    # 展平成 [B, D]
+    x_flat = x.view(B, D)
+    stride_x = x_flat.stride(0)
+
+    # BLOCK 設成 64/128/256（適合 ROCm wavefront）
+    BLOCK = min(triton.next_power_of_2(D), 256)
 
     if out is None:
         out = torch.empty_like(x)
+    out_flat = out.view(B, D)
 
-    grid = (B * S,)
+    grid = (B,)
 
     if residual is None:
-        # Pure RMSNorm
+        # pure RMSNorm
         rms_norm_kernel[grid](
-            x, weight, out,
-            seq_len=B*S,
-            stride=x.stride(1),
+            x_flat,
+            W,
+            out_flat,
+            stride_x=stride_x,
             eps=eps,
             N_COLS=D,
             BLOCK=BLOCK,
+            num_warps=4,
         )
         return out
 
-    # residual exists
+    # residual 存在
+    residual_flat = residual
+    if residual_flat.dim() > 2:
+        residual_flat = residual_flat.view(B, D)
+    if not residual_flat.is_contiguous():
+        residual_flat = residual_flat.contiguous()
+    stride_res = residual_flat.stride(0)
+
     if bias is not None:
-        # Bias+Residual+RMSNorm
+        # Bias + Residual + RMSNorm
         bias_residual_rms_norm_kernel[grid](
-            x, weight, bias, residual, out,
-            seq_len=B*S,
-            x_stride=x.stride(1),
-            res_stride=residual.stride(1),
+            x_flat,
+            W,
+            bias,
+            residual_flat,
+            out_flat,
+            stride_x=stride_x,
+            stride_res=stride_res,
             eps=eps,
             N_COLS=D,
             BLOCK=BLOCK,
+            num_warps=4,
         )
         return out
 
-    # Only residual + rms norm
+    # Residual + RMSNorm
     if out_residual is None:
         out_residual = torch.empty_like(x)
+    out_res_flat = out_residual.view(B, D)
 
     add_rms_norm_kernel[grid](
-        x, weight, residual, out, out_residual,
-        seq_len=B*S,
-        x_stride=x.stride(1),
-        res_stride=residual.stride(1),
+        x_flat,
+        W,
+        residual_flat,
+        out_flat,
+        out_res_flat,
+        stride_x=stride_x,
+        stride_res=stride_res,
         eps=eps,
         N_COLS=D,
         BLOCK=BLOCK,
+        num_warps=4,
     )
     return out, out_residual

@@ -22,11 +22,16 @@ def _process_bad_words_(scores: torch.Tensor,
                         bad_words: torch.LongTensor,
                         mask: torch.BoolTensor,
                         filter_value: float = -float('inf')):
-    """Process bad words."""
-    filtered_scores = scores.gather(1, bad_words)
-    filtered_scores[mask] = filter_value
-    scores.scatter_(1, bad_words, filtered_scores)
-    return scores
+    """Process bad words using Triton kernel when available."""
+    try:
+        from lmdeploy.pytorch.kernels.cuda.ban_bad_words import ban_bad_words
+        return ban_bad_words(scores, bad_words, mask, filter_value=filter_value)
+    except ImportError:
+        # Fallback to PyTorch implementation
+        filtered_scores = scores.gather(1, bad_words)
+        filtered_scores[mask] = filter_value
+        scores.scatter_(1, bad_words, filtered_scores)
+        return scores
 
 
 def _process_repetition_penalty_(scores: torch.Tensor, input_ids: torch.LongTensor, penalty: torch.Tensor):

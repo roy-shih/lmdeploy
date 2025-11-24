@@ -12,18 +12,23 @@ class DefaultRMSNormImpl(RMSNormImpl):
         self.eps = eps
 
     def forward(self, x: torch.Tensor, weight: torch.Tensor, residual: torch.Tensor = None):
-        """forward."""
-        input_dtype = x.dtype
-        if residual is not None:
-            x = x + residual
-            residual = x
-        x = x.to(torch.float32)
-        variance = x.pow(2).mean(-1, keepdim=True)
-        x = x * torch.rsqrt(variance + self.eps)
-        x = weight * x.to(input_dtype)
-        if residual is None:
-            return x
-        return x, residual
+        """forward using Triton kernel when available."""
+        try:
+            from lmdeploy.pytorch.kernels.cuda.rms_norm import rms_norm
+            return rms_norm(x, weight, eps=self.eps, residual=residual)
+        except ImportError:
+            # Fallback to PyTorch implementation
+            input_dtype = x.dtype
+            if residual is not None:
+                x = x + residual
+                residual = x
+            x = x.to(torch.float32)
+            variance = x.pow(2).mean(-1, keepdim=True)
+            x = x * torch.rsqrt(variance + self.eps)
+            x = weight * x.to(input_dtype)
+            if residual is None:
+                return x
+            return x, residual
 
 
 class DefaultRMSNormBuilder(RMSNormBuilder):

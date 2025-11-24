@@ -24,7 +24,7 @@ This document tracks the status of porting TurboMind's CUDA kernels to Triton fo
 | **Positional Emb** | `rotary_embedding.cu` (implied) | Rotary Positional Embedding | `apply_rotary_pos_emb.py` | ✅ | ⚠️ **Partial** (Missing Llama 3 / Yarn support) |
 | **Quantization** | `quantization.cu` | Weight-only quantization utils | `w8a8_kernels.py` | | ✅ **Done** |
 | **Misc** | `apply_token_bitmask_inplace_cuda.cu` | Masking operations | N/A | | ❌ **Missing** |
-| | `ban_bad_words.cu` | Generation constraints | N/A | | ❌ **Missing** |
+| | `ban_bad_words.cu` | Generation constraints | `ban_bad_words.py` | ✅ | ✅ **Done** (Single-token banning) |
 | | `stop_criteria_kernels.cu` | Stop criteria check | `stop_criteria.py` | ✅ | ✅ **Done** (Length + Stop words) |
 
 ## High-Priority Porting Candidates
