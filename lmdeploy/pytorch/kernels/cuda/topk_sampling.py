@@ -1,4 +1,4 @@
-# Copyright (c) OpenMMLab. All rights reserved.
+# Copyright (c) UnieAI. All rights reserved.
 """Top-K sampling kernels optimized with Triton."""
 import torch
 import triton
