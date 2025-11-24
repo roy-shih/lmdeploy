@@ -4,16 +4,16 @@
 
 | # | Kernel 名称 | TurboMind 源文件 | 目标文件 | 优先级 | 难度 | 工作量 | 状态 |
 |---|------------|------------------|----------|--------|------|--------|------|
-| 1 | **Top-K Sampling** | `sampling_topk_kernels.cu` | `cuda/topk_sampling.py` | 🔴 | ⭐⭐ | 1-2周 | ⬜ |
-| 2 | **Top-P Sampling** | `sampling_topp_kernels.cu` | `cuda/topp_sampling.py` | 🔴 | ⭐⭐⭐ | 2-3周 | ⬜ |
+| 1 | **Top-K Sampling** | `sampling_topk_kernels.cu` | `cuda/topk_sampling.py` | 🔴 | ⭐⭐ | 1-2周 | ✅ |
+| 2 | **Top-P Sampling** | `sampling_topp_kernels.cu` | `cuda/topp_sampling.py` | 🔴 | ⭐⭐⭐ | 2-3周 | ✅ |
 | 3 | **KV Cache INT8 Quant** | `attention/decoding_*_u8.cu` (12个) | `cuda/kv_cache_quant_int8.py` | 🔴 | ⭐⭐ | 1-2周 | ⬜ |
 | 4 | **KV Cache INT4 Quant** | `attention/decoding_*_u4.cu` (12个) | `cuda/kv_cache_quant_int4.py` | 🔴 | ⭐⭐⭐ | 2-3周 | ⬜ |
 | 5 | **SM80 GEMM (A100)** | `gemm/kernel/sm80_*.cu` (3个) | `cuda/gemm_sm80.py` | 🔴 | ⭐⭐⭐ | 2-3周 | ⬜ |
 | 6 | **SM90 GEMM (H100)** | `gemm/kernel/sm90_*.cu` (4个) | `cuda/gemm_sm90.py` | 🔴 | ⭐⭐⭐⭐ | 4-6周 | ⬜ |
 | 7 | **TMA (H100)** | `gemm/tma.cu` | `cuda/tma.py` | 🔴 | ⭐⭐⭐⭐⭐ | 6-8周 | ⬜ |
-| 8 | **GELU and Mul** | `activation_kernels.cu` | `cuda/activation.py` (扩展) | 🟡 | ⭐ | 3-5天 | ⬜ |
+| 8 | **GELU and Mul** | `activation_kernels.cu` | `cuda/activation.py` (扩展) | 🟡 | ⭐ | 3-5天 | ✅ |
 | 9 | **Penalty Kernels** | `sampling_penalty_kernels.cu` | `cuda/sampling_penalty.py` | 🟡 | ⭐⭐ | 1周 | ⬜ |
-| 10 | **Embedding + Pos Enc** | `decoding_kernels.cu` | `cuda/embedding_lookup.py` | 🟡 | ⭐⭐ | 1周 | ⬜ |
+| 10 | **Embedding + Pos Enc** | `decoding_kernels.cu` | `cuda/embedding_lookup.py` | 🟡 | ⭐⭐ | 1周 | ✅ |
 | 11 | **Context Parallelism** | `attention/cp_utils.cu` | `cuda/context_parallel.py` | 🟡 | ⭐⭐⭐⭐ | 3-4周 | ⬜ |
 | 12 | **Online Quant** | `quantization.cu` | `cuda/online_quant.py` | 🟡 | ⭐⭐⭐ | 2-3周 | ⬜ |
 | 13 | **Type Convert** | `gemm/convert_v3.cu` | `cuda/type_convert.py` | 🟡 | ⭐⭐ | 1周 | ⬜ |
