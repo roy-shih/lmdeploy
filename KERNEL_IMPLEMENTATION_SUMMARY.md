@@ -1,7 +1,6 @@
 # 🎉 Kernel 实现总结报告
 
 **实施日期**: 2025-11-24
-**分支**: `claude/lmdeploy-architecture-analysis-01PQLSYgd8WeFuAsNbk69WmQ`
 **提交**: `745d9dc` (kernels), `7624144` (checklist update)
 
 ---
@@ -480,6 +479,6 @@ class FusedLogitsProcessor:
 
 ---
 
-**维护者**: Claude
+**维护者**: UnieAI
 **最后更新**: 2025-11-24
 **状态**: ✅ 4/17 kernels completed (23.5%)

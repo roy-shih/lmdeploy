@@ -3,8 +3,6 @@
 **Project**: LMDeploy TurboMind → PyTorch Triton Kernel Migration
 **Client**: UnieAI
 **Date**: 2025-11-24
-**Branch**: `claude/lmdeploy-architecture-analysis-01PQLSYgd8WeFuAsNbk69WmQ`
-
 ---
 
 ## ✅ Executive Summary
@@ -483,10 +481,9 @@ c321443 - Implement 8 advanced kernels for production-grade inference (Batch 2)
 ## 📞 Support & Maintenance
 
 ### Contact
-- **Developer**: Claude (Anthropic AI)
+- **Developer**: Roy Shih
 - **Client**: UnieAI
 - **Repository**: `roy-shih/lmdeploy`
-- **Branch**: `claude/lmdeploy-architecture-analysis-01PQLSYgd8WeFuAsNbk69WmQ`
 
 ### Recommended Next Steps
 1. **Testing**: Run full test suite on target hardware
