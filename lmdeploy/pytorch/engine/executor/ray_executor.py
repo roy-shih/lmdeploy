@@ -1,6 +1,5 @@
 # Copyright (c) OpenMMLab. All rights reserved.
 import asyncio
-import base64
 import contextlib
 import json
 import os
@@ -14,7 +13,7 @@ from ray.util.scheduling_strategies import PlacementGroupSchedulingStrategy
 
 from lmdeploy.pytorch import envs as _envs
 from lmdeploy.pytorch.backends.selector import init_backend
-from lmdeploy.pytorch.config import BackendConfig, CacheConfig, DistConfig, MiscConfig, ModelConfig
+from lmdeploy.pytorch.config import BackendConfig, CacheConfig, DistConfig, MiscConfig, ModelConfig, SpecDecodeConfig
 from lmdeploy.pytorch.devices import DeviceContext, get_device_manager
 from lmdeploy.pytorch.disagg.conn.protocol import DistServeInitRequest, DistServeKVTransferEndpointInfo
 from lmdeploy.pytorch.disagg.messages import MigrationExecutionBatch
@@ -151,20 +150,17 @@ class RayWorkerWrapper(WorkerWrapperBase):
         model_path: str,
         cache_config: CacheConfig,
         backend_config: BackendConfig,
+        model_config: ModelConfig,
         dist_config: DistConfig,
         misc_config: MiscConfig,
         adapters: Dict[str, str] = None,
         device_type: str = 'cuda',
         dtype: str = 'auto',
         log_level: int = 30,
+        specdecode_config: SpecDecodeConfig = None,
     ):
         init_backend(device_type)
         try_import_deeplink(device_type)
-
-        model_config = ModelConfig.from_pretrained(model_path,
-                                                   dtype=dtype,
-                                                   hf_overrides=misc_config.hf_overrides,
-                                                   dist_config=dist_config)
 
         super().__init__(
             model_path=model_path,
@@ -176,6 +172,7 @@ class RayWorkerWrapper(WorkerWrapperBase):
             adapters=adapters,
             device_type=device_type,
             log_level=log_level,
+            specdecode_config=specdecode_config,
         )
         self.node_ip = ray.util.get_node_ip_address()
         self._remote_logger = RemoteLogger()
@@ -224,25 +221,31 @@ class RayWorkerWrapper(WorkerWrapperBase):
 class RayExecutor(ExecutorBase):
     """Ray executor."""
 
-    def __init__(self,
-                 model_path: str,
-                 model_config: ModelConfig,
-                 cache_config: CacheConfig,
-                 backend_config: BackendConfig,
-                 dist_config: DistConfig,
-                 misc_config: MiscConfig,
-                 adapters: Dict[str, str] = None,
-                 device_type: str = 'cuda',
-                 dtype: str = 'auto'):
+    def __init__(
+        self,
+        model_path: str,
+        model_config: ModelConfig,
+        cache_config: CacheConfig,
+        backend_config: BackendConfig,
+        dist_config: DistConfig,
+        misc_config: MiscConfig,
+        adapters: Dict[str, str] = None,
+        device_type: str = 'cuda',
+        dtype: str = 'auto',
+        specdecode_config: SpecDecodeConfig = None,
+    ):
         """Initialize Executor."""
-        super().__init__(model_path=model_path,
-                         model_config=model_config,
-                         cache_config=cache_config,
-                         backend_config=backend_config,
-                         dist_config=dist_config,
-                         misc_config=misc_config,
-                         adapters=adapters,
-                         device_type=device_type)
+        super().__init__(
+            model_path=model_path,
+            model_config=model_config,
+            cache_config=cache_config,
+            backend_config=backend_config,
+            dist_config=dist_config,
+            misc_config=misc_config,
+            adapters=adapters,
+            device_type=device_type,
+            specdecode_config=specdecode_config,
+        )
 
         device_ctx = DeviceContext(device_type)
         with get_device_manager().context(device_ctx):
@@ -265,6 +268,7 @@ class RayExecutor(ExecutorBase):
             worker_kwargs = dict(
                 model_path=model_path,
                 cache_config=cache_config,
+                model_config=model_config,
                 backend_config=backend_config,
                 dist_config=dist_config,
                 misc_config=misc_config,
@@ -272,6 +276,7 @@ class RayExecutor(ExecutorBase):
                 device_type=device_type,
                 dtype=dtype,
                 log_level=logger.level,
+                specdecode_config=specdecode_config,
             )
 
             logger.info('Init ray workers.')
@@ -314,13 +319,13 @@ class RayExecutor(ExecutorBase):
         """Gather available memory."""
         return self.collective_rpc('get_free_mem')
 
-    def set_cache_config(self, cache_config: CacheConfig):
+    def set_cache_config(self, cache_config: CacheConfig, spec_cache_config: CacheConfig = None):
         """Set all cache config."""
-        self.collective_rpc('set_cache_config', (cache_config, ))
+        self.collective_rpc('set_cache_config', (cache_config, spec_cache_config))
 
-    def set_model_config(self, model_config: ModelConfig):
+    def set_model_config(self, model_config: ModelConfig, spec_model_config: ModelConfig = None):
         """Set all model config."""
-        self.collective_rpc('set_model_config', (model_config, ))
+        self.collective_rpc('set_model_config', (model_config, spec_model_config))
 
     def build_graph_runner(self):
         """Build graph runner."""
@@ -347,13 +352,6 @@ class RayExecutor(ExecutorBase):
         if tags is None or 'kv_cache' in tags:
             self.update_configs()
         self.collective_rpc('wakeup', (tags, ))
-
-    def serialize(self, obj) -> str:
-        """Serialize obj."""
-        ref = ray.put(obj)
-        data = ray.cloudpickle.dumps(ref)
-        data = base64.b64encode(data).decode('utf-8')
-        return data
 
     def get_input_processor(self):
         """Build cache engine."""
@@ -555,13 +553,14 @@ class RayExecutor(ExecutorBase):
     def _init_distributed_environment_by_device(self, device_str: str):
         """Init distributed environment."""
         driver_ip = _get_master_addr()
-        if device_str in ['cuda', 'maca']:
+        if device_str == 'cuda':
             self.workers = self._sort_workers(driver_ip, self.workers)
 
         elif device_str == 'ascend':
             self._init_ascend_distributed_environment(driver_ip)
-        elif device_str == 'camb':
-            self._init_camb_distributed_environment(driver_ip)
+        elif device_str in ['camb', 'maca']:
+            self.workers = self._sort_workers(driver_ip, self.workers)
+            ray.get([worker.set_device.remote(idx) for idx, worker in enumerate(self.workers)])
         else:
             raise ValueError(f'Unsupported device type: {device_str}')
 
@@ -583,10 +582,6 @@ class RayExecutor(ExecutorBase):
             ray.get([worker.set_device.remote(idx) for idx, worker in enumerate(self.workers)])
         else:
             self.workers = self._sort_workers(driver_ip, self.workers)
-
-    def _init_camb_distributed_environment(self, driver_ip):
-        self.workers = self._sort_workers(driver_ip, self.workers)
-        ray.get([worker.set_device.remote(idx) for idx, worker in enumerate(self.workers)])
 
     """ PD Disaggregation API Begin """
 

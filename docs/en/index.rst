@@ -88,6 +88,7 @@ Documentation
 
    benchmark/benchmark.md
    benchmark/evaluate_with_opencompass.md
+   benchmark/evaluate_with_vlmevalkit.md
 
 .. toctree::
    :maxdepth: 1
@@ -104,6 +105,8 @@ Documentation
    advance/pytorch_profiling.md
    advance/metrics.md
    advance/context_parallel.md
+   advance/spec_decoding.md
+   advance/update_weights.md
 
 .. toctree::
    :maxdepth: 1
