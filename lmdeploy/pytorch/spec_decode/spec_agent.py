@@ -96,6 +96,16 @@ class SpecModelAgent(BaseSpecModelAgent):
             # update last token indices
             last_token_indices = last_token_indices - num_rejected_tokens
 
+            # PEARL Adaptive Gamma Feedback
+            if hasattr(self.proposer, 'update_gamma'):
+                # Handle possible Tensor types for counts
+                total_drafted = input_draft_token_ids.numel()
+                total_rejected = num_rejected_tokens.sum().item() if isinstance(num_rejected_tokens, torch.Tensor) else num_rejected_tokens
+                total_accepted = total_drafted - total_rejected
+                
+                batch_size = input_draft_token_ids.shape[0]
+                self.proposer.update_gamma(total_accepted, total_drafted, batch_size)
+
         # create new inputs
         input_ids = model_inputs.input_ids.clone()
         seq_length = model_inputs.seq_length

@@ -253,6 +253,34 @@ class PEARLProposer(BaseSpecProposer):
                 # Rejected: stay in pre-verify for next iteration
                 self.pre_verify_states[seq_id] = True
 
+    def update_gamma(self, num_accepted: int, num_drafted: int, batch_size: int = 1):
+        """Update adaptive gamma based on acceptance rate using AIMD algorithm.
+        
+        AIMD: Additive Increase, Multiplicative Decrease
+        - High acceptance rate (> 0.8): Increase gamma
+        - Medium acceptance rate (0.5 - 0.8): Keep gamma
+        - Low acceptance rate (< 0.5): Decrease gamma
+        """
+        if not self.pearl_config.enable_adaptive_gamma or self.pearl_config.gamma > 0:
+            return
+
+        acceptance_rate = num_accepted / num_drafted if num_drafted > 0 else 0.0
+        
+        # Get current gamma for this batch size (approximate)
+        current_gamma = self.get_adaptive_gamma(batch_size)
+        new_gamma = current_gamma
+        
+        if acceptance_rate > 0.8:
+            # Additive Increase
+            new_gamma = min(current_gamma + 1, 8)  # Max gamma 8
+        elif acceptance_rate < 0.5:
+            # Multiplicative Decrease
+            new_gamma = max(int(current_gamma * 0.8), 2)  # Min gamma 2
+            
+        # Update LUT
+        # Since we use batch size bins, we update the bin for this batch size
+        self.gamma_lut[batch_size] = new_gamma
+
 
 def build_pearl_proposer(specdecode_config: PEARLConfig, device: str = 'cuda'):
     """Build PEARL proposer."""
