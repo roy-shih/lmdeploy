@@ -170,6 +170,16 @@ class SpecModelAgent(BaseSpecModelAgent):
         else:
             outputs = await self._async_forward(inputs)
 
+        # PEARL special path: Parallel draft generation
+        if self.method == 'pearl':
+            # Use parallel draft generation
+            # Note: PEARL handles the loop internally with CUDA streams
+            draft_token_ids = self.proposer.draft_tokens_parallel(
+                outputs, inputs, extra_inputs, self.cache_engine,
+                num_tokens=self.num_spec_tokens if self.num_spec_tokens > 0 else None
+            )
+            return draft_token_ids
+
         loop_count = self.num_spec_tokens - 1
         draft_token_ids, model_metas, target_hidden_states = self.proposer.get_outputs(outputs, inputs, extra_inputs)
         draft_tokens_li = [draft_token_ids]
