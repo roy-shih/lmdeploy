@@ -192,6 +192,12 @@ class PEARLProposer(BaseSpecProposer):
         
         # Stack tokens: [batch_size, num_tokens]
         draft_tokens = torch.cat(draft_tokens, dim=1)
+        
+        # Ensure synchronization with parallel stream
+        ready_event = torch.cuda.Event()
+        ready_event.record(self.draft_stream)
+        torch.cuda.current_stream().wait_event(ready_event)
+        
         return draft_tokens
 
     def get_outputs(self,
