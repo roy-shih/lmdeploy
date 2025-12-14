@@ -1,3 +1,73 @@
+# PEARL Integration - Parallel Speculative Decoding
+
+**Date**: 2024-12-14
+**Author**: UnieAI Team
+**Objective**: Integrate nano-PEARL's parallel speculative decoding capabilities into lmdeploy to optimize throughput and latency.
+
+---
+
+## Overview
+
+This release integrates PEARL (Parallel speculative decoding with Adaptive gamma and Disaggregation) into `lmdeploy`. This allows deploying Draft and Target models on separate GPUs (Disaggregation) and generating draft tokens in parallel with target verification (using CUDA Streams).
+
+---
+
+## Key Features
+
+1.  **Draft-Target Disaggregation**:
+    - Assign Draft and Target models to different GPUs (e.g., Draft on GPU 0, Target on GPU 1-3).
+    - Configured via `PEARLConfig` or CLI args (`--pearl-draft-devices`, `--pearl-target-devices`).
+    - Benefit: Eliminates memory contention and allows independent scaling.
+
+2.  **Parallel Execution**:
+    - Uses CUDA Streams to run Draft generation without blocking the main thread.
+    - Optimized `SpecModelAgent` to bypass sequential loops and execute parallel draft generation.
+    - Added CUDA Event synchronization to ensure data safety between streams.
+
+3.  **Adaptive Gamma**:
+    - Implemented AIMD (Additive Increase Multiplicative Decrease) algorithm.
+    - Dynamically adjusts draft length (Gamma) based on acceptance rate.
+    - **Fix**: Resolved issue where CLI `num_spec_tokens` default (1) overrode adpative gamma.
+
+4.  **High-Throughput Batching**:
+    - **Fix**: Resolved `unflatten` stride issue in Rejection Sampling to support Batch Size > 1.
+    - Support for large batch sizes (e.g., 32) ensuring high throughput.
+
+5.  **Observability**:
+    - Added **MAT (Mean Accepted Tokens)** logging.
+    - Logs detailed stats: Batch Size, Gamma updates, Acceptance Rate, MAT.
+
+---
+
+## Integration Details
+
+### Modified Files
+
+- **Config**: `lmdeploy/pytorch/config.py` - Added `PEARLConfig`.
+- **Proposer**: `lmdeploy/pytorch/spec_decode/proposers/pearl.py` - New file. Implements `PEARLProposer`.
+- **Agent**: `lmdeploy/pytorch/spec_decode/spec_agent.py` - Integrated parallel path and adaptive feedback loop.
+- **CLI**: `lmdeploy/cli/utils.py` - Added PEARL CLI arguments.
+
+### Usage Example
+
+```bash
+lmdeploy serve api_server meta-llama/Llama-3.1-70B-Instruct \
+  --speculative-algorithm pearl \
+  --speculative-draft-model meta-llama/Llama-3.1-8B-Instruct \
+  --pearl-draft-devices 0 \
+  --pearl-target-devices 1 2 3
+```
+
+---
+
+## Verification
+
+- **Logic**: Verified disaggregation, parallel stream logic, and AIMD algorithm.
+- **Fixes**: Validated fixes for "Batch Size 1 limit" and "Fixed Gamma" bugs.
+- **Stats**: MAT logging enabled for runtime verification.
+
+---
+
 # TurboMind Kernel Porting - ROCm-Optimized Triton Kernels
 
 **Date**: 2024-11-24  
