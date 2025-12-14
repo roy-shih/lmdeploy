@@ -253,9 +253,11 @@ class PEARLProposer(BaseSpecProposer):
         
         self._log_counter += 1
         if self._log_counter % 50 == 0:
+            mat = num_accepted / batch_size if batch_size > 0 else 0
             logger.info(f"[PEARL] Stats | Batch Size: {batch_size} | "
                        f"Gamma: {current_gamma} -> {new_gamma} | "
                        f"Acceptance Rate: {acceptance_rate:.2f} | "
+                       f"MAT: {mat:.2f} | "
                        f"Drafted: {num_drafted}, Accepted: {num_accepted}")
             
         # Update LUT
