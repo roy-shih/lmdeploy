@@ -86,8 +86,14 @@ class SpecModelAgent(BaseSpecModelAgent):
         last_token_indices = model_inputs.seq_length.cumsum(0) - 1
         if model_inputs.is_decoding:
             # only do rejection sample for decoding with draft tokens
-            input_draft_token_ids = model_inputs.input_ids.squeeze(0).unflatten(0, (-1, self.num_spec_tokens + 1))[:,
-                                                                                                                   1:]
+            # For PEARL (Adaptive Gamma), stride is dynamic based on current inputs
+            if self.method == 'pearl' and model_inputs.seq_length is not None:
+                # Assuming uniform gamma in batch
+                stride = int(model_inputs.seq_length[0].item())
+            else:
+                stride = self.num_spec_tokens + 1
+                
+            input_draft_token_ids = model_inputs.input_ids.squeeze(0).unflatten(0, (-1, stride))[:, 1:]
             output_token_ids, num_rejected_tokens, next_token_ids = self.rejection_sampler(
                 extra_inputs.target_logits,
                 input_draft_token_ids,
