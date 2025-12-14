@@ -67,7 +67,7 @@ class SpecModelAgent(BaseSpecModelAgent):
                                                          model_config=self.model_config,
                                                          cache_config=self.cache_config,
                                                          backend_config=self.backend_config,
-                                                         device=self.device)
+                                                         device=self.proposer.device)
 
     def build_cache_engine(self, cache_stream: torch.cuda.Stream):
         """Build cache engine."""
@@ -104,6 +104,12 @@ class SpecModelAgent(BaseSpecModelAgent):
                 total_accepted = total_drafted - total_rejected
                 
                 batch_size = input_draft_token_ids.shape[0]
+
+                # Log MAT (Mean Accepted Tokens)
+                mat = total_accepted / batch_size
+                if total_drafted > 0:
+                    logger.info(f"SpecDecode metrics: MAT={mat:.2f}, Accepted={total_accepted}, Drafted={total_drafted}, Rejection Rate={total_rejected/total_drafted:.2f}")
+
                 self.proposer.update_gamma(total_accepted, total_drafted, batch_size)
 
         # create new inputs
@@ -184,9 +190,10 @@ class SpecModelAgent(BaseSpecModelAgent):
         if self.method == 'pearl':
             # Use parallel draft generation
             # Note: PEARL handles the loop internally with CUDA streams
+            # Pass num_tokens=None to allow PEARL to use its own adaptive gamma logic
             draft_token_ids = self.proposer.draft_tokens_parallel(
                 outputs, inputs, extra_inputs, self.cache_engine,
-                num_tokens=self.num_spec_tokens if self.num_spec_tokens > 0 else None
+                num_tokens=None
             )
             return draft_token_ids
 

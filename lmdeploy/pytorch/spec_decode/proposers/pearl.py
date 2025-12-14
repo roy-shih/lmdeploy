@@ -28,11 +28,15 @@ logger = get_logger('lmdeploy')
 class PEARLProposer(BaseSpecProposer):
     """PEARL (Parallel Speculative Decoding) Proposer.
     
-    Implements parallel draft-target execution with:
-    1. GPU separation: Draft on dedicated GPUs
-    2. CUDA streams: Parallel execution
-    3. Pre-verify: Target can start early
-    4. Adaptive gamma: Dynamic draft length
+    Implements "Offloaded Serial" speculative decoding:
+    1. GPU separation: Draft on dedicated GPUs (Offloading)
+    2. CUDA streams: Asynchronous execution on draft device
+    3. Adaptive gamma: Dynamic draft length
+    
+    Note: This is NOT the full pipelined PEARL algorithm (which overlaps
+    Verification and Generation). It is Standard Speculative Decoding
+    but with the Draft Model offloaded to another GPU to reduce VRAM
+    usage and interference on the Target GPU.
     """
 
     def __init__(self, specdecode_config: PEARLConfig, device: torch.device = None):
@@ -53,9 +57,7 @@ class PEARLProposer(BaseSpecProposer):
         
         # Adaptive gamma lookup table
         self.gamma_lut = {}  # {batch_size: optimal_gamma}
-        
-        # Pre-verify state tracking
-        self.pre_verify_states = {}  # {seq_id: bool}
+
         
         logger.info(f"Initializing PEARL Proposer: "
                    f"draft_devices={self.draft_devices}, "
@@ -220,44 +222,7 @@ class PEARLProposer(BaseSpecProposer):
         
         return draft_token_ids, model_metas, hidden_states
 
-    def prepare_pre_verify_inputs(self,
-                                   model_inputs: ModelInputs,
-                                   draft_tokens: torch.Tensor,
-                                   seq_ids: List[int]) -> ModelInputs:
-        """Prepare inputs for pre-verification.
-        
-        Pre-verify only checks the first draft token while draft continues.
-        This allows target model to start early.
-        """
-        # For pre-verify, only pass first token of each sequence
-        first_tokens = draft_tokens[:, 0:1]
-        
-        # Clone inputs and update with first token
-        verify_inputs = ModelInputs(
-            input_ids=first_tokens,
-            is_decoding=True,
-            seq_length=model_inputs.seq_length,
-            history_lengths=model_inputs.history_lengths,
-            # ... copy other relevant fields
-        )
-        
-        return verify_inputs
 
-    def init_pre_verify_states(self, seq_ids: List[int]):
-        """Initialize pre-verify states for sequences."""
-        for seq_id in seq_ids:
-            if seq_id not in self.pre_verify_states:
-                self.pre_verify_states[seq_id] = True  # Start with pre-verify
-
-    def update_pre_verify_states(self, seq_ids: List[int], accepted: List[bool]):
-        """Update pre-verify states based on verification results."""
-        for seq_id, acc in zip(seq_ids, accepted):
-            if acc:
-                # Accepted: move to post-verify (verify remaining tokens)
-                self.pre_verify_states[seq_id] = False
-            else:
-                # Rejected: stay in pre-verify for next iteration
-                self.pre_verify_states[seq_id] = True
 
     def update_gamma(self, num_accepted: int, num_drafted: int, batch_size: int = 1):
         """Update adaptive gamma based on acceptance rate using AIMD algorithm.
@@ -282,6 +247,16 @@ class PEARLProposer(BaseSpecProposer):
         elif acceptance_rate < 0.5:
             # Multiplicative Decrease
             new_gamma = max(int(current_gamma * 0.8), 2)  # Min gamma 2
+            
+        if not hasattr(self, '_log_counter'):
+            self._log_counter = 0
+        
+        self._log_counter += 1
+        if self._log_counter % 50 == 0:
+            logger.info(f"[PEARL] Stats | Batch Size: {batch_size} | "
+                       f"Gamma: {current_gamma} -> {new_gamma} | "
+                       f"Acceptance Rate: {acceptance_rate:.2f} | "
+                       f"Drafted: {num_drafted}, Accepted: {num_accepted}")
             
         # Update LUT
         # Since we use batch size bins, we update the bin for this batch size
