@@ -67,7 +67,7 @@ class SpecModelAgent(BaseSpecModelAgent):
                                                          model_config=self.model_config,
                                                          cache_config=self.cache_config,
                                                          backend_config=self.backend_config,
-                                                         device=self.device)
+                                                         device=self.proposer.device)
 
     def build_cache_engine(self, cache_stream: torch.cuda.Stream):
         """Build cache engine."""
@@ -86,8 +86,14 @@ class SpecModelAgent(BaseSpecModelAgent):
         last_token_indices = model_inputs.seq_length.cumsum(0) - 1
         if model_inputs.is_decoding:
             # only do rejection sample for decoding with draft tokens
-            input_draft_token_ids = model_inputs.input_ids.squeeze(0).unflatten(0, (-1, self.num_spec_tokens + 1))[:,
-                                                                                                                   1:]
+            # For PEARL (Adaptive Gamma), stride is dynamic based on current inputs
+            if self.method == 'pearl' and model_inputs.seq_length is not None:
+                # Assuming uniform gamma in batch
+                stride = int(model_inputs.seq_length[0].item())
+            else:
+                stride = self.num_spec_tokens + 1
+                
+            input_draft_token_ids = model_inputs.input_ids.squeeze(0).unflatten(0, (-1, stride))[:, 1:]
             output_token_ids, num_rejected_tokens, next_token_ids = self.rejection_sampler(
                 extra_inputs.target_logits,
                 input_draft_token_ids,
@@ -95,6 +101,22 @@ class SpecModelAgent(BaseSpecModelAgent):
             )
             # update last token indices
             last_token_indices = last_token_indices - num_rejected_tokens
+
+            # PEARL Adaptive Gamma Feedback
+            if hasattr(self.proposer, 'update_gamma'):
+                # Handle possible Tensor types for counts
+                total_drafted = input_draft_token_ids.numel()
+                total_rejected = num_rejected_tokens.sum().item() if isinstance(num_rejected_tokens, torch.Tensor) else num_rejected_tokens
+                total_accepted = total_drafted - total_rejected
+                
+                batch_size = input_draft_token_ids.shape[0]
+
+                # Log MAT (Mean Accepted Tokens)
+                mat = total_accepted / batch_size
+                if total_drafted > 0:
+                    logger.info(f"SpecDecode metrics: MAT={mat:.2f}, Accepted={total_accepted}, Drafted={total_drafted}, Rejection Rate={total_rejected/total_drafted:.2f}")
+
+                self.proposer.update_gamma(total_accepted, total_drafted, batch_size)
 
         # create new inputs
         input_ids = model_inputs.input_ids.clone()
@@ -169,6 +191,17 @@ class SpecModelAgent(BaseSpecModelAgent):
             outputs = await __long_context_single_forward(inputs_li)
         else:
             outputs = await self._async_forward(inputs)
+
+        # PEARL special path: Parallel draft generation
+        if self.method == 'pearl':
+            # Use parallel draft generation
+            # Note: PEARL handles the loop internally with CUDA streams
+            # Pass num_tokens=None to allow PEARL to use its own adaptive gamma logic
+            draft_token_ids = self.proposer.draft_tokens_parallel(
+                outputs, inputs, extra_inputs, self.cache_engine,
+                num_tokens=None
+            )
+            return draft_token_ids
 
         loop_count = self.num_spec_tokens - 1
         draft_token_ids, model_metas, target_hidden_states = self.proposer.get_outputs(outputs, inputs, extra_inputs)

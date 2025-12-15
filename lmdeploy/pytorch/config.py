@@ -505,3 +505,59 @@ class SpecDecodeConfig:
             num_speculative_tokens=num_speculative_tokens,
         )
         return obj
+
+
+@dataclass
+class PEARLConfig(SpecDecodeConfig):
+    """PEARL (Parallel Speculative Decoding) specific config.
+    
+    PEARL enables parallel execution of draft and target models on separate GPU groups,
+    with adaptive draft length and pre/post verification strategies.
+    """
+    # GPU device assignment
+    draft_devices: List[int] = field(default_factory=lambda: [0])
+    target_devices: List[int] = field(default_factory=lambda: [1])
+    
+    # PEARL algorithm parameters
+    gamma: int = -1  # Number of draft tokens per step, -1 = auto-set based on profiling
+    enable_pre_verify: bool = True  # Enable pre-verification (verify first token early)
+    enable_post_verify: bool = True  # Enable post-verification (continue drafting during verify)
+    enable_adaptive_gamma: bool = True  # Dynamically adjust gamma based on batch size
+    
+    # Performance tuning
+    use_parallel_streams: bool = True  # Use separate CUDA streams for draft/target
+    draft_temperature: float = 0.0  # Draft model temperature (0 = greedy)
+    
+    # Process group names for distributed communication
+    draft_group_name: str = "pearl_draft"
+    target_group_name: str = "pearl_target"
+    verify_group_name: str = "pearl_verify"
+    
+    def __post_init__(self):
+        """Validate PEARL configuration."""
+        from lmdeploy.utils import get_logger
+        logger = get_logger('lmdeploy')
+        
+        # Validate device assignments
+        if not self.draft_devices:
+            raise ValueError("draft_devices cannot be empty")
+        if not self.target_devices:
+            raise ValueError("target_devices cannot be empty")
+        
+        # Check for device overlap
+        draft_set = set(self.draft_devices)
+        target_set = set(self.target_devices)
+        if draft_set & target_set:
+            raise ValueError(f"draft_devices and target_devices must not overlap. "
+                           f"Overlap: {draft_set & target_set}")
+        
+        # Validate gamma
+        if self.gamma < -1 or self.gamma == 0:
+            raise ValueError(f"gamma must be -1 (auto) or positive, got {self.gamma}")
+        
+        # Log configuration
+        logger.info(f"PEARL Config: draft_devices={self.draft_devices}, "
+                   f"target_devices={self.target_devices}, gamma={self.gamma}")
+        
+        if self.gamma == -1:
+            logger.info("gamma=-1: Will auto-profile optimal draft length at startup")

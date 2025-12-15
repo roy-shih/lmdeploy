@@ -104,11 +104,28 @@ def get_speculative_config(args):
     from lmdeploy.messages import SpeculativeConfig
     speculative_config = None
     if args.speculative_algorithm is not None:
-        speculative_config = SpeculativeConfig(
-            method=args.speculative_algorithm,
-            model=args.speculative_draft_model,
-            num_speculative_tokens=args.speculative_num_draft_tokens,
-        )
+        # Check if PEARL algorithm is selected
+        if args.speculative_algorithm == 'pearl':
+            # Import PEARL-specific config
+            from lmdeploy.pytorch.config import PEARLConfig
+            
+            # Create PEARL configuration
+            speculative_config = PEARLConfig(
+                method='pearl',
+                model=args.speculative_draft_model,
+                num_speculative_tokens=args.speculative_num_draft_tokens,
+                draft_devices=getattr(args, 'pearl_draft_devices', [0]),
+                target_devices=getattr(args, 'pearl_target_devices', [1]),
+                gamma=getattr(args, 'pearl_gamma', -1),
+                enable_adaptive_gamma=not getattr(args, 'pearl_disable_adaptive', False),
+            )
+        else:
+            # Standard speculative decoding (EAGLE, EAGLE3, etc.)
+            speculative_config = SpeculativeConfig(
+                method=args.speculative_algorithm,
+                model=args.speculative_draft_model,
+                num_speculative_tokens=args.speculative_num_draft_tokens,
+            )
     return speculative_config
 
 
@@ -705,8 +722,9 @@ class ArgumentHelper:
         spec_group.add_argument('--speculative-algorithm',
                                 type=str,
                                 default=None,
-                                choices=['eagle', 'eagle3', 'deepseek_mtp'],
-                                help='The speculative algorithm to use. `None` means speculative decoding is disabled')
+                                choices=['eagle', 'eagle3', 'deepseek_mtp', 'pearl'],
+                                help='The speculative algorithm to use. `None` means speculative decoding is disabled. '
+                                     '`pearl` enables parallel speculative decoding with draft-target GPU separation')
 
         spec_group.add_argument('--speculative-draft-model',
                                 type=str,
@@ -716,7 +734,31 @@ class ArgumentHelper:
         spec_group.add_argument('--speculative-num-draft-tokens',
                                 type=int,
                                 default=1,
-                                help='The number of speculative tokens to generate per step')
+                                help='The number of speculative tokens to generate per step. '
+                                     'For PEARL, this serves as fallback if gamma=-1 (auto)')
+
+        # PEARL-specific arguments
+        spec_group.add_argument('--pearl-draft-devices',
+                                type=int,
+                                nargs='+',
+                                default=[0],
+                                help='GPU device IDs for PEARL draft model (PEARL only). Example: --pearl-draft-devices 0')
+
+        spec_group.add_argument('--pearl-target-devices',
+                                type=int,
+                                nargs='+',
+                                default=[1],
+                                help='GPU device IDs for PEARL target model (PEARL only). Example: --pearl-target-devices 1 2 3')
+
+        spec_group.add_argument('--pearl-gamma',
+                                type=int,
+                                default=-1,
+                                help='Number of draft tokens per PEARL step. -1 = auto-profile optimal value (PEARL only)')
+
+        spec_group.add_argument('--pearl-disable-adaptive',
+                                action='store_true',
+                                default=False,
+                                help='Disable adaptive gamma tuning for PEARL')
 
         return spec_group
 
