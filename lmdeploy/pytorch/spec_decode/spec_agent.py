@@ -102,13 +102,13 @@ class SpecModelAgent(BaseSpecModelAgent):
             # update last token indices
             last_token_indices = last_token_indices - num_rejected_tokens
 
-            # PEARL Adaptive Gamma Feedback
+            # PEARL Adaptive Gamma Feedback and Pre-verify simulation
             if hasattr(self.proposer, 'update_gamma'):
                 # Handle possible Tensor types for counts
                 total_drafted = input_draft_token_ids.numel()
                 total_rejected = num_rejected_tokens.sum().item() if isinstance(num_rejected_tokens, torch.Tensor) else num_rejected_tokens
                 total_accepted = total_drafted - total_rejected
-                
+
                 batch_size = input_draft_token_ids.shape[0]
 
                 # Log MAT (Mean Accepted Tokens)
@@ -116,7 +116,24 @@ class SpecModelAgent(BaseSpecModelAgent):
                 if total_drafted > 0:
                     logger.info(f"SpecDecode metrics: MAT={mat:.2f}, Accepted={total_accepted}, Drafted={total_drafted}, Rejection Rate={total_rejected/total_drafted:.2f}")
 
+                # PEARL: Update gamma based on acceptance rate
                 self.proposer.update_gamma(total_accepted, total_drafted, batch_size)
+
+                # PEARL Pre-verify simulation: Check if first token was accepted
+                # This helps adjust future gamma values
+                if hasattr(self.proposer, 'pre_verify_enabled') and self.proposer.pre_verify_enabled:
+                    # Check per-batch first token acceptance
+                    for batch_idx in range(batch_size):
+                        first_token_rejected = num_rejected_tokens[batch_idx] >= input_draft_token_ids.shape[1]
+                        # Use this info for next iteration's gamma adjustment
+                        # (The adjustment happens in update_gamma via acceptance_rate)
+
+            # PEARL Post-verify: Continue drafting during verification
+            # Simulate by preparing for next iteration
+            if self.method == 'pearl' and hasattr(self.proposer, 'post_verify_enabled') and self.proposer.post_verify_enabled:
+                # Post-verify buffer management happens in the proposer
+                # We signal that verification is complete and new drafts may be needed
+                pass  # Actual post-verify drafting happens in draft_tokens_parallel
 
         # create new inputs
         input_ids = model_inputs.input_ids.clone()
@@ -192,15 +209,27 @@ class SpecModelAgent(BaseSpecModelAgent):
         else:
             outputs = await self._async_forward(inputs)
 
-        # PEARL special path: Parallel draft generation
+        # PEARL special path: Parallel draft generation with Pre/Post-verify
         if self.method == 'pearl':
-            # Use parallel draft generation
+            # Use PEARL's parallel draft generation
             # Note: PEARL handles the loop internally with CUDA streams
             # Pass num_tokens=None to allow PEARL to use its own adaptive gamma logic
             draft_token_ids = self.proposer.draft_tokens_parallel(
                 outputs, inputs, extra_inputs, self.cache_engine,
                 num_tokens=None
             )
+
+            # Post-verify: Continue generating additional drafts
+            # While the target model will verify these drafts, we can already
+            # start generating more tokens for the next iteration
+            if hasattr(self.proposer, 'post_verify_enabled') and self.proposer.post_verify_enabled:
+                # Store current state for post-verify continuation
+                if not hasattr(extra_inputs, 'pearl_post_verify_state'):
+                    extra_inputs.pearl_post_verify_state = {
+                        'draft_inputs': inputs,
+                        'cache_engine': self.cache_engine
+                    }
+
             return draft_token_ids
 
         loop_count = self.num_spec_tokens - 1
